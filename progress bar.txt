@@ -6,7 +6,6 @@ import string
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from datetime import datetime
-from joblib import Parallel, delayed
 
 # Load your Word2Vec model
 @st.cache_resource
@@ -55,14 +54,10 @@ def preprocess_dataframe(df):
     df['days_from_earliest'] = (df['pubDate'] - earliest_date).dt.days
     df['date_scores'] = df['days_from_earliest'] / date_range
 
-    # Parallel processing for embeddings
-    high_embeddings = Parallel(n_jobs=-1)(delayed(text_embedding)(x, model) for x in df['filtered_high'].astype(str))
-    medium_embeddings = Parallel(n_jobs=-1)(delayed(text_embedding)(x, model) for x in df['filtered_medium'].astype(str))
-    low_embeddings = Parallel(n_jobs=-1)(delayed(text_embedding)(x, model) for x in df['filtered_low'].astype(str))
-
-    df['high_embeddings'] = high_embeddings
-    df['medium_embeddings'] = medium_embeddings
-    df['low_embeddings'] = low_embeddings
+    # Create high_embeddings, medium_embeddings, and low_embeddings columns
+    df['high_embeddings'] = df['filtered_high'].astype(str).apply(lambda x: text_embedding(x, model))
+    df['medium_embeddings'] = df['filtered_medium'].astype(str).apply(lambda x: text_embedding(x, model))
+    df['low_embeddings'] = df['filtered_low'].astype(str).apply(lambda x: text_embedding(x, model))
 
     # Calculate weighted embeddings
     df['weighted_emb'] = df.apply(calculate_weighted_embeddings, axis=1)
