@@ -9,7 +9,7 @@ from nltk.corpus import stopwords
 from datetime import datetime
 
 # Load your Word2Vec model
-@st.cache(allow_output_mutation=True)
+@st.cache_data
 def load_model():
     return Word2Vec.load('word2vec_100v_500e_10w.model')
 
@@ -39,14 +39,14 @@ def calculate_weighted_embeddings(row):
     weighted_emb = (0.6 * high_emb + 0.3 * medium_emb + 0.1 * low_emb)
     return weighted_emb
 
+# Fixed file path
+file_path = 'path/to/your/preprocessed_data.csv'
+
 # Streamlit UI
 st.title("Text Embedding with Word2Vec")
 
-# File uploader for the preprocessed CSV file
-uploaded_file = st.file_uploader("Choose the preprocessed CSV file", type="csv")
-
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+try:
+    df = pd.read_csv(file_path)
     df['pubDate'] = pd.to_datetime(df['pubDate'])
     
     # Calculate date scores
@@ -56,12 +56,17 @@ if uploaded_file is not None:
     df['days_from_earliest'] = (df['pubDate'] - earliest_date).dt.days
     df['date_scores'] = df['days_from_earliest'] / date_range
     
-    # Display a preview of the DataFrame
-    st.write("Data Preview:")
-    st.write(df.head())
+    # Create high_embeddings, medium_embeddings, and low_embeddings columns
+    df['high_embeddings'] = df['filtered_high'].astype(str).apply(lambda x: text_embedding(x, model))
+    df['medium_embeddings'] = df['filtered_medium'].astype(str).apply(lambda x: text_embedding(x, model))
+    df['low_embeddings'] = df['filtered_low'].astype(str).apply(lambda x: text_embedding(x, model))
 
     # Calculate weighted embeddings
     df['weighted_emb'] = df.apply(calculate_weighted_embeddings, axis=1)
+    
+    # Display a preview of the DataFrame
+    st.write("Data Preview:")
+    st.write(df.head())
 
     # Sliders for setting weights
     date_weight = st.slider("Date weight", 0.0, 1.0, 0.4)
@@ -83,7 +88,7 @@ if uploaded_file is not None:
         query_embedding = text_embedding(processed_query, model)
         
         # Normalize document embeddings
-        norm_doc_emb = df['weighted_emb'].apply(lambda x: np.array(eval(x)) / np.linalg.norm(np.array(eval(x)))).tolist()
+        norm_doc_emb = df['weighted_emb'].apply(lambda x: np.array(x) / np.linalg.norm(np.array(x))).tolist()
         norm_doc_emb = np.array(norm_doc_emb)
         
         # Normalize query embedding
@@ -101,3 +106,8 @@ if uploaded_file is not None:
         # Display top documents
         st.write("Top Documents:")
         st.write(top_docs)
+
+except FileNotFoundError:
+    st.error("File not found. Please check the file path.")
+except Exception as e:
+    st.error(f"An error occurred while loading the file: {e}")
