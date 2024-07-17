@@ -1,0 +1,103 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from gensim.models import Word2Vec
+import string
+from nltk.tokenize import word_tokenize
+from spacy.lang.en import stop_words
+from nltk.corpus import stopwords
+from datetime import datetime
+
+# Load your Word2Vec model
+@st.cache(allow_output_mutation=True)
+def load_model():
+    return Word2Vec.load('word2vec_100v_500e_10w.model')
+
+model = load_model()
+
+# Preprocessing functions
+def preprocess_text(text):
+    text = text.lower()
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    tokens = word_tokenize(text)
+    stop_words_set = set(stopwords.words('english'))
+    tokens = [word for word in tokens if word not in stop_words_set]
+    return ' '.join(tokens)
+
+def text_embedding(text, model):
+    words = text.split()
+    word_vec = [model.wv[word] for word in words if word in model.wv]
+    if len(word_vec) == 0:
+        return np.zeros(model.vector_size)
+    else:
+        return np.mean(word_vec, axis=0)
+
+def calculate_weighted_embeddings(row):
+    high_emb = row['high_embeddings']
+    medium_emb = row['medium_embeddings']
+    low_emb = row['low_embeddings']
+    weighted_emb = (0.6 * high_emb + 0.3 * medium_emb + 0.1 * low_emb)
+    return weighted_emb
+
+# Streamlit UI
+st.title("Text Embedding with Word2Vec")
+
+# File uploader for the preprocessed CSV file
+uploaded_file = st.file_uploader("Choose the preprocessed CSV file", type="csv")
+
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    df['pubDate'] = pd.to_datetime(df['pubDate'])
+    
+    # Calculate date scores
+    latest_date = df['pubDate'].max()
+    earliest_date = df['pubDate'].min()
+    date_range = (latest_date - earliest_date).days
+    df['days_from_earliest'] = (df['pubDate'] - earliest_date).dt.days
+    df['date_scores'] = df['days_from_earliest'] / date_range
+    
+    # Display a preview of the DataFrame
+    st.write("Data Preview:")
+    st.write(df.head())
+
+    # Calculate weighted embeddings
+    df['weighted_emb'] = df.apply(calculate_weighted_embeddings, axis=1)
+
+    # Sliders for setting weights
+    date_weight = st.slider("Date weight", 0.0, 1.0, 0.4)
+    similarity_weight = st.slider("Similarity weight", 0.0, 1.0, 0.6)
+
+    # Text input for the query
+    query = st.text_input("Enter your query:")
+    # Multiselect for choosing columns to display
+    columns_to_display = st.multiselect(
+        "Select columns to display in the results",
+        df.columns.tolist(),
+        default=['docId', 'pubDate', 'summary']
+    )
+    
+    if query:
+        # Preprocess the query
+        processed_query = preprocess_text(query)
+        # Get the query embedding
+        query_embedding = text_embedding(processed_query, model)
+        
+        # Normalize document embeddings
+        norm_doc_emb = df['weighted_emb'].apply(lambda x: np.array(eval(x)) / np.linalg.norm(np.array(eval(x)))).tolist()
+        norm_doc_emb = np.array(norm_doc_emb)
+        
+        # Normalize query embedding
+        norm_query_emb = query_embedding / np.linalg.norm(query_embedding)
+        
+        # Calculate similarities
+        similarities = np.dot(norm_doc_emb, norm_query_emb)
+        # Calculate weighted scores
+        weighted_scores = similarity_weight * similarities + date_weight * df['date_scores']
+        
+        # Get top 20 documents
+        top_indices = np.argsort(weighted_scores)[-20:][::-1]
+        top_docs = df.iloc[top_indices][columns_to_display]
+        
+        # Display top documents
+        st.write("Top Documents:")
+        st.write(top_docs)
