@@ -9,9 +9,9 @@ from nltk.corpus import stopwords
 from datetime import datetime
 
 # Load your Word2Vec model
-@st.cache_data
+@st.cache_resource
 def load_model():
-    return Word2Vec.load('word2vec_100v_500e_10w.model')
+    return Word2Vec.load('path/to/your/word2vec_100v_500e_10w.model')
 
 model = load_model()
 
@@ -24,6 +24,7 @@ def preprocess_text(text):
     tokens = [word for word in tokens if word not in stop_words_set]
     return ' '.join(tokens)
 
+@st.cache_data
 def text_embedding(text, model):
     words = text.split()
     word_vec = [model.wv[word] for word in words if word in model.wv]
@@ -32,21 +33,27 @@ def text_embedding(text, model):
     else:
         return np.mean(word_vec, axis=0)
 
-def calculate_weighted_embeddings(row):
-    high_emb = row['high_embeddings']
-    medium_emb = row['medium_embeddings']
-    low_emb = row['low_embeddings']
-    weighted_emb = (0.6 * high_emb + 0.3 * medium_emb + 0.1 * low_emb)
-    return weighted_emb
-
-# Fixed file path
-file_path = 'path/to/your/preprocessed_data.csv'
+@st.cache_data
+def calculate_weighted_embeddings(df):
+    def weighted_embeddings(row):
+        high_emb = row['high_embeddings']
+        medium_emb = row['medium_embeddings']
+        low_emb = row['low_embeddings']
+        return 0.6 * high_emb + 0.3 * medium_emb + 0.1 * low_emb
+    
+    df['weighted_emb'] = df.apply(weighted_embeddings, axis=1)
+    return df
 
 # Streamlit UI
 st.title("Text Embedding with Word2Vec")
 
+# Fixed file path
+file_path = '/path/to/your/preprocessed_data.csv'
+
 try:
-    df = pd.read_csv(file_path)
+    # Read the CSV file with low_memory=False
+    df = pd.read_csv(file_path, low_memory=False)
+    
     df['pubDate'] = pd.to_datetime(df['pubDate'])
     
     # Calculate date scores
@@ -56,17 +63,12 @@ try:
     df['days_from_earliest'] = (df['pubDate'] - earliest_date).dt.days
     df['date_scores'] = df['days_from_earliest'] / date_range
     
-    # Create high_embeddings, medium_embeddings, and low_embeddings columns
-    df['high_embeddings'] = df['filtered_high'].astype(str).apply(lambda x: text_embedding(x, model))
-    df['medium_embeddings'] = df['filtered_medium'].astype(str).apply(lambda x: text_embedding(x, model))
-    df['low_embeddings'] = df['filtered_low'].astype(str).apply(lambda x: text_embedding(x, model))
-
-    # Calculate weighted embeddings
-    df['weighted_emb'] = df.apply(calculate_weighted_embeddings, axis=1)
-    
     # Display a preview of the DataFrame
     st.write("Data Preview:")
     st.write(df.head())
+    
+    # Calculate weighted embeddings
+    df = calculate_weighted_embeddings(df)
 
     # Sliders for setting weights
     date_weight = st.slider("Date weight", 0.0, 1.0, 0.4)
@@ -88,8 +90,8 @@ try:
         query_embedding = text_embedding(processed_query, model)
         
         # Normalize document embeddings
-        norm_doc_emb = df['weighted_emb'].apply(lambda x: np.array(x) / np.linalg.norm(np.array(x))).tolist()
-        norm_doc_emb = np.array(norm_doc_emb)
+        norm_doc_emb = np.array(df['weighted_emb'].tolist())
+        norm_doc_emb /= np.linalg.norm(norm_doc_emb, axis=1, keepdims=True)
         
         # Normalize query embedding
         norm_query_emb = query_embedding / np.linalg.norm(query_embedding)
