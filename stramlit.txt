@@ -66,27 +66,25 @@ try:
 
     # Text fields for setting weights
     col1, col2 = st.columns(2)
-    with col1:
-        st.text_input("Date weight:", value="0.0", key="date_weight")
-    with col2:
-        st.text_input("Similarity weight:", value="1.0", key="similarity_weight")
+    date_weight_input = col1.text_input("Date weight:", value="0.0")
+    similarity_weight_input = col2.text_input("Similarity weight:", value="1.0")
         
     # Text input for the query
-    st.text_input("Enter your query:", key="query")
+    query_input = st.text_input("Enter your query:")
 
     # Multiselect for choosing columns to display
-    st.multiselect(
+    columns_to_display_input = st.multiselect(
         "Select columns to display in the results",
         df.columns.tolist(),
-        default=['docId', 'pubDate', 'summary'],
-        key="columns_to_display"
+        default=['docId', 'pubDate', 'summary']
     )
 
     if st.button("Fetch Relevant Documents"):
-        date_weight = st.session_state.date_weight
-        similarity_weight = st.session_state.similarity_weight
-        query = st.session_state.query
-        columns_to_display = st.session_state.columns_to_display
+        # Fetch inputs only after the button is clicked
+        date_weight = float(date_weight_input)
+        similarity_weight = float(similarity_weight_input)
+        query = query_input
+        columns_to_display = columns_to_display_input
         
         if query:
             # Preprocess the query
@@ -104,7 +102,7 @@ try:
             # Calculate similarities
             similarities = np.dot(norm_doc_emb, norm_query_emb)
             # Calculate weighted scores
-            weighted_scores = float(similarity_weight) * similarities + float(date_weight) * df['date_scores']
+            weighted_scores = similarity_weight * similarities + date_weight * df['date_scores']
 
             # Get top 20 documents
             top_indices = np.argsort(weighted_scores)[-20:][::-1]
