@@ -1,0 +1,177 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from gensim.models import Word2Vec
+import string
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from datetime import datetime
+
+# Load your Word2Vec model
+@st.cache_resource
+def load_model():
+    return Word2Vec.load('C:/Users/X01512976/Models/Word2Vec/Trail_7/word2vec_100v_500e_10w.model')
+
+model = load_model()
+
+# Preprocessing functions
+def preprocess_text(text):
+    text = text.lower()
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    tokens = word_tokenize(text)
+    stop_words_set = set(stopwords.words('english'))
+    tokens = [word for word in tokens if word not in stop_words_set]
+    return ' '.join(tokens)
+
+def text_embedding(text, model):
+    words = text.split()
+    word_vec = [model.wv[word] for word in words if word in model.wv]
+    if len(word_vec) == 0:
+        return np.zeros(model.vector_size)
+    else:
+        return np.mean(word_vec, axis=0)
+
+def calculate_weighted_embeddings(row):
+    high_emb = row['high_embeddings']
+    medium_emb = row['medium_embeddings']
+    low_emb = row['low_embeddings']
+    weighted_emb = (0.6 * high_emb + 0.3 * medium_emb + 0.1 * low_emb)
+    return weighted_emb
+
+@st.cache_data
+def load_data(file_path):
+    df = pd.read_csv(file_path, low_memory=False)
+    if 'pubDate' in df:
+        df['pubDate'] = pd.to_datetime(df['pubDate'])
+    return df
+
+@st.cache_data
+def preprocess_dataframe(df):
+    # Calculate date scores
+    latest_date = df['pubDate'].max()
+    earliest_date = df['pubDate'].min()
+    date_range = (latest_date - earliest_date).days
+    df['days_from_earliest'] = (df['pubDate'] - earliest_date).dt.days
+    df['date_scores'] = df['days_from_earliest'] / date_range
+
+    # Create high_embeddings, medium_embeddings, and low_embeddings columns
+    df['high_embeddings'] = df['filtered_high'].astype(str).apply(lambda x: text_embedding(x, model))
+    df['medium_embeddings'] = df['filtered_medium'].astype(str).apply(lambda x: text_embedding(x, model))
+    df['low_embeddings'] = df['filtered_low'].astype(str).apply(lambda x: text_embedding(x, model))
+
+    # Calculate weighted embeddings
+    df['weighted_emb'] = df.apply(calculate_weighted_embeddings, axis=1)
+
+    return df
+
+# Fixed file path
+file_path = 'C:/Users/X01512976/Models/Word2Vec/Trail_7/filtered_data.csv'
+
+# Custom CSS for styling
+st.markdown(
+    """
+    <style>
+    .stButton > button {
+        background-color: #00AEEF;
+        color: white;
+    }
+    .stTextInput > div > input {
+        background-color: #F0F0F0;
+    }
+    .stMultiSelect > div > div > div > div > div {
+        background-color: #F0F0F0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Streamlit UI
+st.title("Search with Word2Vec")
+
+try:
+    df = load_data(file_path)
+    df = preprocess_dataframe(df)
+
+    # Text fields for setting weights
+    col1, col2 = st.columns(2)
+    date_weight_input = col1.text_input("Date weight:", value="0.0", key="date_weight_input")
+    similarity_weight_input = col2.text_input("Similarity weight:", value="1.0", key="similarity_weight_input")
+        
+    # Text input for the query
+    query_input = st.text_input("Enter your query:", key="query_input")
+
+    # Multiselect for choosing columns to display
+    columns_to_display_input = st.multiselect(
+        "Select columns to display in the results",
+        df.columns.tolist(),
+        default=['docId', 'pubDate', 'summary'],
+        key="columns_to_display_input"
+    )
+
+    if st.button("Fetch Relevant Documents"):
+        # Validate inputs
+        try:
+            date_weight = float(date_weight_input)
+            similarity_weight = float(similarity_weight_input)
+            if not 0 <= date_weight <= 1 or not 0 <= similarity_weight <= 1:
+                st.error("Weights must be between 0 and 1.")
+            elif not query_input:
+                st.error("Query cannot be empty.")
+            else:
+                query = query_input
+                columns_to_display = columns_to_display_input
+
+                # Progress bar
+                progress = st.progress(0)
+                
+                # Preprocess the query
+                processed_query = preprocess_text(query)
+                progress.progress(20)
+                
+                # Get the query embedding
+                query_embedding = text_embedding(processed_query, model)
+                progress.progress(40)
+
+                # Normalize document embeddings
+                norm_doc_emb = df['weighted_emb'].apply(lambda x: np.array(x) / np.linalg.norm(x)).tolist()
+                norm_doc_emb = np.array(norm_doc_emb)
+                progress.progress(60)
+
+                # Normalize query embedding
+                norm_query_emb = query_embedding / np.linalg.norm(query_embedding)
+                progress.progress(80)
+
+                # Calculate similarities
+                similarities = np.dot(norm_doc_emb, norm_query_emb)
+                # Calculate weighted scores
+                weighted_scores = similarity_weight * similarities + date_weight * df['date_scores']
+                progress.progress(90)
+
+                # Get top 20 documents
+                top_indices = np.argsort(weighted_scores)[-20:][::-1]
+                top_docs = df.iloc[top_indices][columns_to_display]
+
+                # Display top documents
+                st.write("Top Documents:")
+                st.write(top_docs)
+
+                # Allow users to download the results
+                csv = top_docs.to_csv(index=False)
+                st.download_button(label="Download results", data=csv, file_name="results.csv", mime="text/csv")
+
+                progress.progress(100)
+        
+        except ValueError:
+            st.error("Please enter valid weights.")
+
+    if st.button("Clear Inputs"):
+        st.session_state.date_weight_input = "0.0"
+        st.session_state.similarity_weight_input = "1.0"
+        st.session_state.query_input = ""
+        st.session_state.columns_to_display_input = ['docId', 'pubDate', 'summary']
+
+except FileNotFoundError:
+    st.error("File not found. Please check the file path.")
+except Exception as e:
+    st.error(f"An error occurred while loading the file: {e}")
