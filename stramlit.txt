@@ -67,15 +67,15 @@ try:
     # Text fields for setting weights
     col1, col2 = st.columns(2)
     with col1:
-        date_weight = st.text_input("Date weight:", value="0.0", key="date_weight")
+        st.text_input("Date weight:", value="0.0", key="date_weight")
     with col2:
-        similarity_weight = st.text_input("Similarity weight:", value="1.0", key="similarity_weight")
+        st.text_input("Similarity weight:", value="1.0", key="similarity_weight")
         
     # Text input for the query
-    query = st.text_input("Enter your query:", key="query")
+    st.text_input("Enter your query:", key="query")
 
     # Multiselect for choosing columns to display
-    columns_to_display = st.multiselect(
+    st.multiselect(
         "Select columns to display in the results",
         df.columns.tolist(),
         default=['docId', 'pubDate', 'summary'],
@@ -83,6 +83,11 @@ try:
     )
 
     if st.button("Fetch Relevant Documents"):
+        date_weight = st.session_state.date_weight
+        similarity_weight = st.session_state.similarity_weight
+        query = st.session_state.query
+        columns_to_display = st.session_state.columns_to_display
+        
         if query:
             # Preprocess the query
             processed_query = preprocess_text(query)
